@@ -1,0 +1,364 @@
+[[metric]]
+context = "parameter"
+labels = [ "name","param" ]
+metricsdesc = { value ="Gauge metric with database parameter" }
+request = "select name,value as param,1 as value from v$parameter"
+
+[[metric]]
+context = "sessions"
+labels = [ "status", "type" ]
+metricsdesc = { value= "Gauge metric with count of sessions by status and type." }
+request = "SELECT status, type, COUNT(*) as value FROM v$session GROUP BY status, type"
+
+
+[[metric]]
+context = "parameter_sessions"
+metricsdesc = { value ="Gauge metric with sessions parameter" }
+request = "select value  from v$parameter t where t.name = 'sessions'"
+
+
+[[metric]]
+context = "volumns"
+metricsdesc = { value= "database total volumes,size G" }
+request = "SELECT sum(bytes/1024/1024/1024) as value FROM dba_segments"
+
+
+
+
+
+[[metric]]
+context = "env"
+labels = [ "host_name" ]
+metricsdesc = { is_rac = "if 1 then rac." }
+request = '''
+select host_name,
+decode((select value from v$option where parameter = 'Real Application Clusters'), 'TRUE',1,0) as is_rac
+from v$instance
+'''
+
+[[metric]]
+context = "env"
+labels = [ "version" ]
+metricsdesc = { running_time = "get version and running_time" }
+request = '''
+select version,trunc(sysdate - startup_time) as running_time from v$instance
+'''
+
+[[metric]]
+context = "env"
+labels = [ "platform_name","log_mode","force_logging","flashback_on","database_role","open_mode","nls_characterset" ]
+metricsdesc = { value = "get other env" }
+request = '''
+select platform_name,log_mode,force_logging,flashback_on,database_role,open_mode,
+(select value from nls_database_parameters where parameter = 'NLS_CHARACTERSET') as nls_characterset, 1 as value  from v$database
+'''
+
+[[metric]]
+context = "env"
+labels = [ "name" ]
+metricsdesc = { redo_value = "get redo logs info" }
+request = '''
+with temp as(
+select count(group#) as group_num,min(members) as member_num,min(bytes/1024/1024) as log_size from v$log
+)
+select  'group_num' as name ,group_num as redo_value from temp
+union all
+select  'member_num' as name ,member_num as redo_value from temp
+union all
+select  'log_size' as name ,log_size as redo_value from temp
+'''
+
+[[metric]]
+context = "env"
+metricsdesc = { redo_switch_value = "Gauge metric with sum of segments data." }
+request = '''
+select max(sequence#) as redo_switch_value from v$log
+'''
+
+
+[[metric]]
+context = "env"
+metricsdesc = { vols = "Gauge metric with sum of segments data." }
+request = '''
+select to_char(sum(bytes)) as vols from dba_segments
+'''
+
+
+[[metric]]
+context = "events"
+labels = [ "event_name"]
+metricsdesc = { value = "get events from v$session_wait" }
+request = '''
+select event as event_name, count(*) as value
+   from v$session_wait
+      where wait_time >= -1 group by event order by 2 desc
+'''
+
+
+[[metric]]
+context = "db_time"
+metricsdesc = { value="Generic counter metric from v$sys_time_model view in Oracle." }
+request = '''
+select value from v$sys_time_model t where t.STAT_NAME = 'DB time'
+'''
+
+[[metric]]
+context = "sysmetric"
+metricsdesc = { value="Get sysmetrics from v$sysmetric view in Oracle." }
+fieldtoappend = "metric_name"
+request = '''
+select replace(metric_name,'%','') as metric_name ,value from v$sysmetric  where group_id = 2 and metric_name != 'Average Synchronous Single-Block Read Latency'
+'''
+
+
+
+[[metric]]
+context = "sysstat"
+metricsdesc = { value="Compute Oracle IOPS and MBPS from v$sysstat view in Oracle." }
+fieldtoappend = "name"
+request = '''
+select name , trunc(sum(value), 2) as value
+  from (select decode(name,
+                      'physical read total IO requests',
+                      'Oracle IOPS',
+                      'physical write total IO requests',
+                      'Oracle IOPS',
+                      'redo writes',
+                      'Oracle IOPS',
+                      'physical read total bytes',
+                      'Oracle MBPS',
+                      'physical write total bytes',
+                      'Oracle MBPS',
+                      'redo size',
+                      'Oracle MBPS') as name,
+               decode(name,
+                      'physical read total IO requests',
+                      value,
+                      'physical write total IO requests',
+                      value,
+                      'redo writes',
+                      value,
+                      'physical read total bytes',
+                      value / 1024 / 1024,
+                      'physical write total bytes',
+                      value / 1024 / 1024,
+                      'redo size',
+                      value / 1024 / 1024) as value
+          from v$sysstat
+         where name in (
+                        'physical read total bytes',
+                        'physical write total bytes',
+                        'physical read total IO requests',
+                        'physical write total IO requests',
+                        'redo writes',
+                        'redo size'))
+ where name is not null
+ group by name
+union all
+SELECT a.name, a.value
+  FROM v$sysstat a, v$statname b
+ where a.statistic# = b.statistic#
+   and b.name in (
+                  'consistent gets',
+                  'execute count',
+                  'parse count (hard)',
+                  'parse count (total)',
+                  'redo size',
+                  'redo writes',
+                  'sorts (disk)',
+                  'sorts (memory)',
+                  'sorts (rows)',
+                  'user commits',
+	          'user rollbacks',
+	          'logons cumulative',
+                  'bytes sent via SQL*Net to client',
+                  'bytes received via SQL*Net from client')
+'''
+
+
+
+
+
+[[metric]]
+context = "tablespace"
+labels = [ "tablespace", "type" ]
+metricsdesc = { bytes = "Generic counter metric of tablespaces bytes in Oracle.", max_bytes = "Generic counter metric of tablespaces max bytes in Oracle.", free = "Generic counter metric of tablespaces free bytes in Oracle." }
+request = '''
+SELECT
+  df.tablespace_name       as tablespace,
+  df.type                  as type,
+  nvl(sum(df.bytes),0)     as bytes,
+  nvl(sum(df.max_bytes),0) as max_bytes,
+  nvl(sum(f.free),0)       as free
+FROM
+  (
+    SELECT
+      ddf.file_id,
+      dt.contents as type,
+      ddf.file_name,
+      ddf.tablespace_name,
+      TRUNC(ddf.bytes) as bytes,
+      TRUNC(GREATEST(ddf.bytes,ddf.maxbytes)) as max_bytes
+    FROM
+      dba_data_files ddf,
+      dba_tablespaces dt
+    WHERE ddf.tablespace_name = dt.tablespace_name
+  ) df,
+  (
+    SELECT
+      TRUNC(SUM(bytes)) AS free,
+      file_id
+    FROM dba_free_space
+    GROUP BY file_id
+  ) f
+WHERE df.file_id = f.file_id (+)
+GROUP BY df.tablespace_name, df.type
+UNION ALL
+SELECT
+  Y.name                   as tablespace_name,
+  Y.type                   as type,
+  SUM(Y.bytes)             as bytes,
+  SUM(Y.max_bytes)         as max_bytes,
+  MAX(nvl(Y.free_bytes,0)) as free
+FROM
+  (
+    SELECT
+      dtf.tablespace_name as name,
+      dt.contents as type,
+      dtf.status as status,
+      dtf.bytes as bytes,
+      (
+        SELECT
+          ((f.total_blocks - s.tot_used_blocks)*vp.value)
+        FROM
+          (SELECT tablespace_name, sum(used_blocks) tot_used_blocks FROM gv$sort_segment WHERE  tablespace_name!='DUMMY' GROUP BY tablespace_name) s,
+          (SELECT tablespace_name, sum(blocks) total_blocks FROM dba_temp_files where tablespace_name !='DUMMY' GROUP BY tablespace_name) f,
+          (SELECT value FROM v$parameter WHERE name = 'db_block_size') vp
+        WHERE f.tablespace_name=s.tablespace_name AND f.tablespace_name = dtf.tablespace_name
+      ) as free_bytes,
+      CASE
+        WHEN dtf.maxbytes = 0 THEN dtf.bytes
+        ELSE dtf.maxbytes
+      END as max_bytes
+    FROM
+      sys.dba_temp_files dtf,
+      sys.dba_tablespaces dt
+    WHERE dtf.tablespace_name = dt.tablespace_name
+  ) Y
+GROUP BY Y.name, Y.type
+ORDER BY tablespace
+'''
+
+
+
+[[metric]]
+context = "db_recovery_file_dest"
+metricsdesc = { value="sum(PERCENT_SPACE_USED) of V$RECOVERY_AREA_USAG" }
+request = '''
+select sum(t.PERCENT_SPACE_USED) as value from V$RECOVERY_AREA_USAGE t
+'''
+
+
+[[metric]]
+context = "db_recovery_file_dest"
+labels = [ "file_type"]
+metricsdesc = { percent_space_used = "percent_space_used of V$RECOVERY_AREA_USAGE ." }
+request = '''
+select t.file_type,t.percent_space_used from V$RECOVERY_AREA_USAGE t
+'''
+
+
+
+
+
+
+
+
+[[metric]]
+context = "rman_status"
+metricsdesc = { value= "0 indicates rman error or no config rman job, 1 indicates rman is ok" }
+request = '''
+select decode(max(t.COMPLETION_TIME),
+              '',
+              0,
+              case when sysdate-max(t.COMPLETION_TIME) > 1 then 0 else 1 end) as value
+  from v$backup_piece t
+ where t.STATUS = 'A'
+'''
+
+[[metric]]
+context = "rman_info"
+labels = [ "recid","lv_type","controlfile_included","status","device_type","start_time","completion_time","elapsed_seconds","bak_size","compressed","tag" ]
+metricsdesc = { value ="list rman information" }
+request = '''
+select a.recid as recid,
+               decode(b.incremental_level,
+                      '',
+                      decode(backup_type, 'L', 'Archivelog', 'ControlFile'),
+                      1,
+                      'Incr-1',
+                      0,
+                      'Incr-0',
+                      b.incremental_level) as lv_type,
+               b.controlfile_included as controlfile_included,
+               decode(a.status,
+                      'A',
+                      'AVAILABLE',
+                      'D',
+                      'DELETED',
+                      'X',
+                      'EXPIRED',
+                      'ERROR') as status,
+               a.device_type as device_type,
+               a.start_time as start_time,
+               a.completion_time as completion_time,
+               a.elapsed_seconds as elapsed_seconds,
+               round(a.bytes / 1024 / 1024 / 1024,3) as bak_size,
+               a.compressed as compressed,
+               a.tag as tag,
+               1 as value
+          from v$backup_piece a, v$backup_set b
+         where a.set_stamp = b.set_stamp
+           and a.deleted = 'NO'
+           and a.set_count = b.set_count
+           and a.start_time > sysdate-8
+         order by a.completion_time desc
+'''
+
+
+[[metric]]
+context = "dataguard_exist"
+metricsdesc = { value ="1 indicates the presence of dg, 0 indicates no dg." }
+request = '''
+select decode(db_unique_name, 'NONE', 0, 1) as value
+  from v$archive_dest_status
+ where dest_name = 'LOG_ARCHIVE_DEST_2'
+'''
+
+
+[[metric]]
+context = "dataguard_status"
+metricsdesc = { value ="0 indicates no dg, 1 indicates dg has errors, 1 indicates dg is ok;" }
+request = '''
+select case
+         when db_unique_name = 'NONE' then
+          0
+         when status != 'VALID' then
+          1
+         else
+          decode(recovery_mode,
+                 'IDLE',
+                 1,
+                 'MANAGED',
+                 2,
+                 'MANAGED REAL TIME APPLY',
+                 2,
+                 'LOGICAL REAL TIME APPLY',
+                 2,
+                 'LOGICAL APPLY',
+                 2,
+                 1)
+       end as value
+  from v$archive_dest_status
+ where dest_name = 'LOG_ARCHIVE_DEST_2'
+'''
