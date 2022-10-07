@@ -1,7 +1,7 @@
 # oracledb_exporter_metrics
 default-metrics.toml for oracledb_exporter
 
-公司的大佬级DBA做了个Grafana的监控图，拿出来分享给大家，这是给oracledb_exporter用的default-metrics.toml，使用方法参见：
+公司的大佬级DBA蒋勇做了个Grafana的监控图，拿出来分享给大家，这是给oracledb_exporter用的default-metrics.toml，使用方法参见：
 https://github.com/iamseth/oracledb_exporter/blob/master/README.md
 中的Custom metrics部分，我使用的命令供参考：
 ```bash
